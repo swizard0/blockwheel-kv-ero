@@ -1,0 +1,19 @@
+[package]
+name = "blockwheel-kv-ero"
+version = "0.1.0"
+authors = ["Alexey Voznyuk <me@swizard.info>"]
+description = "blockwheel-kv async frontend via ero."
+edition = "2021"
+
+[dependencies]
+ero = { git = "https://github.com/swizard0/ero.git" }
+edeltraud = { git = "https://github.com/swizard0/edeltraud.git" }
+alloc-pool = { git = "https://github.com/swizard0/alloc-pool.git" }
+arbeitssklave = { git = "https://github.com/swizard0/arbeitssklave.git" }
+blockwheel-fs = { git = "https://github.com/swizard0/blockwheel-fs.git" }
+blockwheel-kv = { git = "https://github.com/swizard0/blockwheel-fs.git" }
+
+log = "^0.4"
+futures = "^0.3"
+
+tokio = { version = "^1", features = ["full"] }
