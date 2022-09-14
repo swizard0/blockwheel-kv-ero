@@ -11,7 +11,7 @@ edeltraud = { git = "https://github.com/swizard0/edeltraud.git" }
 alloc-pool = { git = "https://github.com/swizard0/alloc-pool.git" }
 arbeitssklave = { git = "https://github.com/swizard0/arbeitssklave.git" }
 blockwheel-fs = { git = "https://github.com/swizard0/blockwheel-fs.git" }
-blockwheel-kv = { git = "https://github.com/swizard0/blockwheel-fs.git" }
+blockwheel-kv = { git = "https://github.com/swizard0/blockwheel-kv.git" }
 
 log = "^0.4"
 futures = "^0.3"
