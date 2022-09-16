@@ -39,11 +39,66 @@ pub fn job<P>(sklave_job: SklaveJob, thread_pool: &P) where P: edeltraud::Thread
 
 #[derive(Debug)]
 pub enum Error {
+    ReceiveOrder(arbeitssklave::Error),
+    GenServerIsLostOnRequestInfo,
+    GenServerIsLostOnRequestInsert,
+    GenServerIsLostOnRequestRemove,
+    GenServerIsLostOnRequestFlush,
+    GenServerIsLostOnRequestLookupRange,
 }
 
 fn run_job<P>(mut sklave_job: SklaveJob, _thread_pool: &P) -> Result<(), Error> where P: edeltraud::ThreadPool<job::Job> {
-
-    todo!()
+    loop {
+        let mut befehle = match sklave_job.zu_ihren_diensten() {
+            Ok(arbeitssklave::Gehorsam::Machen { befehle, }) =>
+                befehle,
+            Ok(arbeitssklave::Gehorsam::Rasten) =>
+                return Ok(()),
+            Err(error) =>
+                return Err(Error::ReceiveOrder(error)),
+        };
+        loop {
+            match befehle.befehl() {
+                arbeitssklave::SklavenBefehl::Mehr { befehl, mehr_befehle, } => {
+                    befehle = mehr_befehle;
+                    match befehl {
+                        Order::InfoCancel(komm::UmschlagAbbrechen { .. }) =>
+                            return Err(Error::GenServerIsLostOnRequestInfo),
+                        Order::Info(komm::Umschlag { payload: info, stamp: reply_tx, }) =>
+                            if let Err(_send_error) = reply_tx.send(info) {
+                                log::debug!("client is gone during RequestInfo");
+                            },
+                        Order::InsertCancel(komm::UmschlagAbbrechen { .. }) =>
+                            return Err(Error::GenServerIsLostOnRequestInsert),
+                        Order::Insert(komm::Umschlag { payload: inserted, stamp: reply_tx, }) =>
+                            if let Err(_send_error) = reply_tx.send(inserted) {
+                                log::debug!("client is gone during RequestInsert");
+                            },
+                        Order::LookupRangeCancel(komm::UmschlagAbbrechen { .. }) =>
+                            return Err(Error::GenServerIsLostOnRequestLookupRange),
+                        Order::LookupRange(komm::Umschlag { payload: key_value_stream_item, stamp: _, }) =>
+                            todo!(),
+                        Order::RemoveCancel(komm::UmschlagAbbrechen { .. }) =>
+                            return Err(Error::GenServerIsLostOnRequestRemove),
+                        Order::Remove(komm::Umschlag { payload: removed, stamp: reply_tx, }) =>
+                            if let Err(_send_error) = reply_tx.send(removed) {
+                                log::debug!("client is gone during RequestRemove");
+                            },
+                        Order::FlushCancel(komm::UmschlagAbbrechen { .. }) =>
+                            return Err(Error::GenServerIsLostOnRequestFlush),
+                        Order::Flushed(komm::Umschlag { payload: Flushed, stamp: reply_tx, }) =>
+                            if let Err(_send_error) = reply_tx.send(Flushed) {
+                                log::debug!("client is gone during RequestFlush");
+                            },
+                    }
+                },
+                arbeitssklave::SklavenBefehl::Ende { sklave_job: next_sklave_job, } => {
+                    sklave_job = next_sklave_job;
+                    break;
+                },
+            }
+        }
+    }
 }
 
 impl From<komm::UmschlagAbbrechen<proto::RequestInfoReplyTx>> for Order {
