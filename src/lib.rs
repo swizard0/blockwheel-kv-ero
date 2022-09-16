@@ -13,18 +13,18 @@ use futures::{
     },
     stream,
     SinkExt,
+    StreamExt,
 };
 
 use alloc_pool::{
     bytes::{
-        Bytes,
         BytesPool,
     },
 };
 
 pub use blockwheel_kv::{
     kv,
-    wheels,
+    version,
     Params,
     Inserted,
     Removed,
@@ -33,7 +33,13 @@ pub use blockwheel_kv::{
     WheelInfo,
 };
 
+pub mod job;
+pub mod wheels;
+
 mod proto;
+mod gen_server;
+mod ftd_sklave;
+mod access_policy;
 
 pub struct GenServer {
     request_tx: mpsc::Sender<proto::Request>,
@@ -43,6 +49,44 @@ pub struct GenServer {
 #[derive(Clone)]
 pub struct Pid {
     request_tx: mpsc::Sender<proto::Request>,
+}
+
+impl GenServer {
+    pub fn new() -> GenServer {
+        let (request_tx, request_rx) = mpsc::channel(0);
+        GenServer {
+            request_tx,
+            fused_request_rx: request_rx.fuse(),
+        }
+    }
+
+    pub fn pid(&self) -> Pid {
+        Pid {
+            request_tx: self.request_tx.clone(),
+        }
+    }
+
+    pub async fn run<P>(
+        self,
+        parent_supervisor: ero::supervisor::SupervisorPid,
+        params: Params,
+        blocks_pool: BytesPool,
+        version_provider: version::Provider,
+        wheels: wheels::Wheels,
+        thread_pool: P,
+    )
+    where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
+    {
+        gen_server::run(
+            self.fused_request_rx,
+            parent_supervisor,
+            params,
+            blocks_pool,
+            version_provider,
+            wheels,
+            thread_pool,
+        ).await
+    }
 }
 
 #[derive(Debug)]
