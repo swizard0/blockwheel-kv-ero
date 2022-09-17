@@ -166,16 +166,17 @@ impl Pid {
     }
 
     pub async fn lookup(&mut self, key: kv::Key) -> Result<Option<kv::ValueCell<kv::Value>>, LookupError> {
-        let search_range = proto::SearchRangeBounds::single(key);
         loop {
             let (reply_tx, reply_rx) = oneshot::channel();
             self.request_tx
-                .send(proto::Request::LookupRange(proto::RequestLookupRange {
-                    search_range: search_range.clone(),
-                    reply_kind: proto::RequestLookupKind::Single(
-                        proto::RequestLookupKindSingle { reply_tx, },
+                .send(proto::Request::LookupRange(
+                    proto::RequestLookupKind::Single(
+                        proto::RequestLookupKindSingle {
+                            key: key.clone(),
+                            reply_tx,
+                        },
                     ),
-                }))
+                ))
                 .await
                 .map_err(|_send_error| LookupError::GenServer(ero::NoProcError))?;
 
@@ -189,16 +190,18 @@ impl Pid {
     }
 
     pub async fn lookup_range<R>(&mut self, range: R) -> Result<LookupRange, LookupRangeError> where R: RangeBounds<kv::Key> {
-        let search_range: proto::SearchRangeBounds = range.into();
+        let range_from = range.start_bound();
+        let range_to = range.end_bound();
         loop {
             let (reply_tx, reply_rx) = oneshot::channel();
             self.request_tx
-                .send(proto::Request::LookupRange(proto::RequestLookupRange {
-                    search_range: search_range.clone(),
-                    reply_kind: proto::RequestLookupKind::Range(
-                        proto::RequestLookupKindRange { reply_tx, },
-                    ),
-                }))
+                .send(proto::Request::LookupRange(proto::RequestLookupKind::Range(
+                    proto::RequestLookupKindRange {
+                        range_from: range_from.cloned(),
+                        range_to: range_to.cloned(),
+                        reply_tx,
+                    },
+                )))
                 .await
                 .map_err(|_send_error| LookupRangeError::GenServer(ero::NoProcError))?;
 

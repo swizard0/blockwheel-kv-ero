@@ -1,8 +1,15 @@
+use futures::{
+    channel::{
+        oneshot,
+    },
+};
+
 use arbeitssklave::{
     komm,
 };
 
 use crate::{
+    kv,
     job,
     proto,
     access_policy::{
@@ -21,8 +28,8 @@ pub enum Order {
     Info(komm::Umschlag<Info, proto::RequestInfoReplyTx>),
     InsertCancel(komm::UmschlagAbbrechen<proto::RequestInsertReplyTx>),
     Insert(komm::Umschlag<Inserted, proto::RequestInsertReplyTx>),
-    LookupRangeCancel(komm::UmschlagAbbrechen<proto::RequestLookupKind>),
-    LookupRange(komm::Umschlag<blockwheel_kv::KeyValueStreamItem<AccessPolicy>, proto::RequestLookupKind>),
+    LookupRangeCancel(komm::UmschlagAbbrechen<LookupKind>),
+    LookupRange(komm::Umschlag<blockwheel_kv::KeyValueStreamItem<AccessPolicy>, LookupKind>),
     RemoveCancel(komm::UmschlagAbbrechen<proto::RequestRemoveReplyTx>),
     Remove(komm::Umschlag<Removed, proto::RequestRemoveReplyTx>),
     FlushCancel(komm::UmschlagAbbrechen<proto::RequestFlushReplyTx>),
@@ -30,6 +37,19 @@ pub enum Order {
 }
 
 pub struct Welt;
+
+pub enum LookupKind {
+    Single(LookupKindSingle),
+    Range(LookupKindRange),
+}
+
+pub struct LookupKindSingle {
+    pub reply_tx: oneshot::Sender<Option<kv::ValueCell<kv::Value>>>,
+}
+
+pub struct LookupKindRange {
+    pub kv_items_stream_tx: oneshot::Sender<blockwheel_kv::KeyValueStreamItem<AccessPolicy>>,
+}
 
 pub fn job<P>(sklave_job: SklaveJob, thread_pool: &P) where P: edeltraud::ThreadPool<job::Job> {
     if let Err(error) = run_job(sklave_job, thread_pool) {
@@ -76,8 +96,30 @@ fn run_job<P>(mut sklave_job: SklaveJob, _thread_pool: &P) -> Result<(), Error> 
                             },
                         Order::LookupRangeCancel(komm::UmschlagAbbrechen { .. }) =>
                             return Err(Error::GenServerIsLostOnRequestLookupRange),
-                        Order::LookupRange(komm::Umschlag { payload: key_value_stream_item, stamp: _, }) =>
-                            todo!(),
+                        Order::LookupRange(komm::Umschlag {
+                            stamp: LookupKind::Single(LookupKindSingle { reply_tx, }),
+                            payload: blockwheel_kv::KeyValueStreamItem::NoMore,
+                        }) =>
+                            if let Err(_send_error) = reply_tx.send(None) {
+                                log::debug!("client is gone during RequestLookup (None)");
+                            },
+                        Order::LookupRange(komm::Umschlag {
+                            stamp: LookupKind::Single(LookupKindSingle { reply_tx, }),
+                            payload: blockwheel_kv::KeyValueStreamItem::KeyValue {
+                                key_value_pair,
+                                ..
+                            },
+                        }) =>
+                            if let Err(_send_error) = reply_tx.send(Some(key_value_pair.value_cell)) {
+                                log::debug!("client is gone during RequestLookup (Some)");
+                            },
+                        Order::LookupRange(komm::Umschlag {
+                            stamp: LookupKind::Range(LookupKindRange { kv_items_stream_tx, }),
+                            payload: key_value_stream_item,
+                        }) =>
+                            if let Err(_send_error) = kv_items_stream_tx.send(key_value_stream_item) {
+                                log::debug!("lookup range process is gone during RequestLookupRange");
+                            },
                         Order::RemoveCancel(komm::UmschlagAbbrechen { .. }) =>
                             return Err(Error::GenServerIsLostOnRequestRemove),
                         Order::Remove(komm::Umschlag { payload: removed, stamp: reply_tx, }) =>
@@ -125,14 +167,14 @@ impl From<komm::Umschlag<Inserted, proto::RequestInsertReplyTx>> for Order {
     }
 }
 
-impl From<komm::UmschlagAbbrechen<proto::RequestLookupKind>> for Order {
-    fn from(v: komm::UmschlagAbbrechen<proto::RequestLookupKind>) -> Order {
+impl From<komm::UmschlagAbbrechen<LookupKind>> for Order {
+    fn from(v: komm::UmschlagAbbrechen<LookupKind>) -> Order {
         Order::LookupRangeCancel(v)
     }
 }
 
-impl From<komm::Umschlag<blockwheel_kv::KeyValueStreamItem<AccessPolicy>, proto::RequestLookupKind>> for Order {
-    fn from(v: komm::Umschlag<blockwheel_kv::KeyValueStreamItem<AccessPolicy>, proto::RequestLookupKind>) -> Order {
+impl From<komm::Umschlag<blockwheel_kv::KeyValueStreamItem<AccessPolicy>, LookupKind>> for Order {
+    fn from(v: komm::Umschlag<blockwheel_kv::KeyValueStreamItem<AccessPolicy>, LookupKind>) -> Order {
         Order::LookupRange(v)
     }
 }

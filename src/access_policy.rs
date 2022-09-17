@@ -9,7 +9,7 @@ impl blockwheel_kv::AccessPolicy for AccessPolicy {
     type Order = ftd_sklave::Order;
     type Info = proto::RequestInfoReplyTx;
     type Insert = proto::RequestInsertReplyTx;
-    type LookupRange = proto::RequestLookupKind;
+    type LookupRange = ftd_sklave::LookupKind;
     type Remove = proto::RequestRemoveReplyTx;
     type Flush = proto::RequestFlushReplyTx;
 }

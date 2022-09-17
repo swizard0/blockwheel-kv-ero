@@ -1,7 +1,6 @@
 use std::{
     ops::{
         Bound,
-        RangeBounds,
     },
 };
 
@@ -23,7 +22,7 @@ use crate::{
 pub enum Request {
     Info(RequestInfo),
     Insert(RequestInsert),
-    LookupRange(RequestLookupRange),
+    LookupRange(RequestLookupKind),
     Remove(RequestRemove),
     FlushAll(RequestFlush),
 }
@@ -39,10 +38,13 @@ pub enum RequestLookupKind {
 }
 
 pub struct RequestLookupKindSingle {
+    pub key: kv::Key,
     pub reply_tx: oneshot::Sender<Option<kv::ValueCell<kv::Value>>>,
 }
 
 pub struct RequestLookupKindRange {
+    pub range_from: Bound<kv::Key>,
+    pub range_to: Bound<kv::Key>,
     pub reply_tx: oneshot::Sender<LookupRange>,
 }
 
@@ -58,11 +60,6 @@ pub struct RequestInsert {
     pub reply_tx: RequestInsertReplyTx,
 }
 
-pub struct RequestLookupRange {
-    pub search_range: SearchRangeBounds,
-    pub reply_kind: RequestLookupKind,
-}
-
 #[derive(Debug)]
 pub struct RequestRemove {
     pub key: kv::Key,
@@ -72,42 +69,4 @@ pub struct RequestRemove {
 #[derive(Debug)]
 pub struct RequestFlush {
     pub reply_tx: RequestFlushReplyTx,
-}
-
-#[derive(Clone, Debug)]
-pub struct SearchRangeBounds {
-    pub range_from: Bound<kv::Key>,
-    pub range_to: Bound<kv::Key>,
-}
-
-impl SearchRangeBounds {
-    pub fn single(key: kv::Key) -> SearchRangeBounds {
-        SearchRangeBounds {
-            range_from: Bound::Included(key.clone()),
-            range_to: Bound::Included(key),
-        }
-    }
-}
-
-impl<R> From<R> for SearchRangeBounds where R: RangeBounds<kv::Key> {
-    fn from(range: R) -> SearchRangeBounds {
-        SearchRangeBounds {
-            range_from: match range.start_bound() {
-                Bound::Unbounded =>
-                    Bound::Unbounded,
-                Bound::Included(key) =>
-                    Bound::Included(key.clone()),
-                Bound::Excluded(key) =>
-                    Bound::Excluded(key.clone()),
-            },
-            range_to: match range.end_bound() {
-                Bound::Unbounded =>
-                    Bound::Unbounded,
-                Bound::Included(key) =>
-                    Bound::Included(key.clone()),
-                Bound::Excluded(key) =>
-                    Bound::Excluded(key.clone()),
-            },
-        }
-    }
 }

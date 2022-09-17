@@ -169,20 +169,30 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                     )
                     .map_err(Error::RequestInsertBefehl)?;
             },
-            proto::Request::LookupRange(proto::RequestLookupRange {
-                search_range,
-                reply_kind: proto::RequestLookupKind::Single(
-                    proto::RequestLookupKindSingle { reply_tx, },
+            proto::Request::LookupRange(
+                proto::RequestLookupKind::Single(
+                    proto::RequestLookupKindSingle { key, reply_tx, },
                 ),
-            }) => {
-                todo!()
+            ) => {
+                blockwheel_kv_meister
+                    .lookup_range(
+                        key.clone() ..= key,
+                        ftd_sendegeraet.rueckkopplung(
+                            ftd_sklave::LookupKind::Single(
+                                ftd_sklave::LookupKindSingle { reply_tx, },
+                            ),
+                        ),
+                        &edeltraud::ThreadPoolMap::new(&thread_pool),
+                    )
+                    .map_err(Error::RequestInsertBefehl)?;
             },
-            proto::Request::LookupRange(proto::RequestLookupRange {
-                search_range,
-                reply_kind: proto::RequestLookupKind::Range(
-                    proto::RequestLookupKindRange { reply_tx, },
-                ),
-            }) => {
+            proto::Request::LookupRange(proto::RequestLookupKind::Range(
+                proto::RequestLookupKindRange {
+                    range_from,
+                    range_to,
+                    reply_tx,
+                },
+            )) => {
                 todo!()
             },
             proto::Request::Remove(proto::RequestRemove { key, reply_tx, }) => {
