@@ -1,8 +1,14 @@
 use futures::{
     channel::{
         mpsc,
+        oneshot,
     },
-    stream,
+    stream::{
+        self,
+        FuturesUnordered,
+    },
+    select,
+    SinkExt,
     StreamExt,
 };
 
@@ -35,6 +41,8 @@ use crate::{
         AccessPolicy,
     },
     Params,
+    LookupRange,
+    KeyValueStreamItem,
 };
 
 #[derive(Debug)]
@@ -47,6 +55,8 @@ pub enum Error {
     RequestInsertBefehl(arbeitssklave::Error),
     RequestRemoveBefehl(arbeitssklave::Error),
     RequestFlushBefehl(arbeitssklave::Error),
+    LookupRangeNext(komm::Error),
+    BlockwheelKvMeisterHasGoneDuringLookupRange,
 }
 
 pub async fn run<P>(
@@ -149,9 +159,25 @@ async fn busyloop<P>(
     -> Result<(), ErrorSeverity<State<P>, Error>>
 where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
 {
-    while let Some(request) = fused_request_rx.next().await {
-        match request {
-            proto::Request::Info(proto::RequestInfo { reply_tx, }) => {
+    let mut lookup_tasks = FuturesUnordered::new();
+
+    loop {
+        enum Event<R, T> {
+            Request(R),
+            Task(T),
+        }
+
+        let event = select! {
+            result = fused_request_rx.next() =>
+                Event::Request(result),
+            result = lookup_tasks.next() =>
+                Event::Task(result.unwrap()),
+        };
+
+        match event {
+            Event::Request(None) =>
+                break,
+            Event::Request(Some(proto::Request::Info(proto::RequestInfo { reply_tx, }))) => {
                 blockwheel_kv_meister
                     .info(
                         ftd_sendegeraet.rueckkopplung(reply_tx),
@@ -159,7 +185,7 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                     )
                     .map_err(Error::RequestInfoBefehl)?;
             },
-            proto::Request::Insert(proto::RequestInsert { key, value, reply_tx, }) => {
+            Event::Request(Some(proto::Request::Insert(proto::RequestInsert { key, value, reply_tx, }))) => {
                 blockwheel_kv_meister
                     .insert(
                         key,
@@ -169,11 +195,13 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                     )
                     .map_err(Error::RequestInsertBefehl)?;
             },
-            proto::Request::LookupRange(
-                proto::RequestLookupKind::Single(
-                    proto::RequestLookupKindSingle { key, reply_tx, },
+            Event::Request(Some(
+                proto::Request::LookupRange(
+                    proto::RequestLookupKind::Single(
+                        proto::RequestLookupKindSingle { key, reply_tx, },
+                    ),
                 ),
-            ) => {
+            )) => {
                 blockwheel_kv_meister
                     .lookup_range(
                         key.clone() ..= key,
@@ -186,16 +214,66 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                     )
                     .map_err(Error::RequestInsertBefehl)?;
             },
-            proto::Request::LookupRange(proto::RequestLookupKind::Range(
-                proto::RequestLookupKindRange {
-                    range_from,
-                    range_to,
-                    reply_tx,
-                },
+            Event::Request(Some(
+                proto::Request::LookupRange(proto::RequestLookupKind::Range(
+                    proto::RequestLookupKindRange {
+                        range_from,
+                        range_to,
+                        reply_tx,
+                    },
+                )),
             )) => {
-                todo!()
+                let blockwheel_kv_meister = blockwheel_kv_meister.clone();
+                let ftd_sendegeraet = ftd_sendegeraet.clone();
+                let thread_pool = thread_pool.clone();
+                lookup_tasks.push(async move {
+                    let (mut key_values_tx, key_values_rx) = mpsc::channel(0);
+                    if let Err(_send_error) = reply_tx.send(LookupRange { key_values_rx, }) {
+                        log::debug!("client has canceled lookup range request");
+                        return Ok(());
+                    }
+
+                    let (mut kv_items_stream_tx, mut kv_items_stream_rx) = oneshot::channel();
+                    blockwheel_kv_meister
+                        .lookup_range(
+                            (range_from, range_to),
+                            ftd_sendegeraet.rueckkopplung(
+                                ftd_sklave::LookupKind::Range(
+                                    ftd_sklave::LookupKindRange { kv_items_stream_tx, },
+                                ),
+                            ),
+                            &edeltraud::ThreadPoolMap::new(&thread_pool),
+                        )
+                        .map_err(Error::RequestInsertBefehl)?;
+                    loop {
+                        match kv_items_stream_rx.await {
+                            Ok(blockwheel_kv::KeyValueStreamItem::KeyValue { key_value_pair, next, }) => {
+                                if let Err(_send_error) = key_values_tx.send(KeyValueStreamItem::KeyValue(key_value_pair)).await {
+                                    log::debug!("client has dropped kv items stream tx, canceling");
+                                    return Ok(());
+                                }
+                                (kv_items_stream_tx, kv_items_stream_rx) = oneshot::channel();
+                                next.next(
+                                    ftd_sendegeraet.rueckkopplung(
+                                        ftd_sklave::LookupKind::Range(
+                                            ftd_sklave::LookupKindRange { kv_items_stream_tx, },
+                                        ),
+                                    ),
+                                ).map_err(Error::LookupRangeNext)?;
+                            },
+                            Ok(blockwheel_kv::KeyValueStreamItem::NoMore) => {
+                                if let Err(_send_error) = key_values_tx.send(KeyValueStreamItem::NoMore).await {
+                                    log::debug!("client has dropped kv items stream tx, canceling");
+                                }
+                                return Ok(());
+                            },
+                            Err(oneshot::Canceled) =>
+                                return Err(Error::BlockwheelKvMeisterHasGoneDuringLookupRange),
+                        }
+                    }
+                });
             },
-            proto::Request::Remove(proto::RequestRemove { key, reply_tx, }) => {
+            Event::Request(Some(proto::Request::Remove(proto::RequestRemove { key, reply_tx, }))) => {
                 blockwheel_kv_meister
                     .remove(
                         key,
@@ -204,7 +282,7 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                     )
                     .map_err(Error::RequestRemoveBefehl)?;
             },
-            proto::Request::FlushAll(proto::RequestFlush { reply_tx, }) => {
+            Event::Request(Some(proto::Request::FlushAll(proto::RequestFlush { reply_tx, }))) => {
                 blockwheel_kv_meister
                     .flush(
                         ftd_sendegeraet.rueckkopplung(reply_tx),
@@ -212,6 +290,10 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                     )
                     .map_err(Error::RequestFlushBefehl)?;
             },
+            Event::Task(Ok(())) =>
+                (),
+            Event::Task(Err(error)) =>
+                return Err(ErrorSeverity::Fatal(error)),
         }
     }
 
