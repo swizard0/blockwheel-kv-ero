@@ -167,11 +167,15 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
             Task(T),
         }
 
-        let event = select! {
-            result = fused_request_rx.next() =>
-                Event::Request(result),
-            result = lookup_tasks.next() =>
-                Event::Task(result.unwrap()),
+        let event = if lookup_tasks.is_empty() {
+            Event::Request(fused_request_rx.next().await)
+        } else {
+            select! {
+                result = fused_request_rx.next() =>
+                    Event::Request(result),
+                result = lookup_tasks.next() =>
+                    Event::Task(result.unwrap()),
+            }
         };
 
         match event {
