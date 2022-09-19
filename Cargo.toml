@@ -7,15 +7,11 @@ edition = "2021"
 
 [dependencies]
 ero = { git = "https://github.com/swizard0/ero.git" }
-# edeltraud = { git = "https://github.com/swizard0/edeltraud.git" }
-edeltraud = { path = "../edeltraud" }
+edeltraud = { git = "https://github.com/swizard0/edeltraud.git" }
 alloc-pool = { git = "https://github.com/swizard0/alloc-pool.git" }
-# arbeitssklave = { git = "https://github.com/swizard0/arbeitssklave.git" }
-arbeitssklave = { path = "../arbeitssklave" }
-# blockwheel-fs = { git = "https://github.com/swizard0/blockwheel-fs.git" }
-blockwheel-fs = { path = "../ero-blockwheel" }
-# blockwheel-kv = { git = "https://github.com/swizard0/blockwheel-kv.git" }
-blockwheel-kv = { path = "../ero-blockwheel-kv" }
+arbeitssklave = { git = "https://github.com/swizard0/arbeitssklave.git" }
+blockwheel-fs = { git = "https://github.com/swizard0/blockwheel-fs.git" }
+blockwheel-kv = { git = "https://github.com/swizard0/blockwheel-kv.git" }
 
 log = "^0.4"
 futures = "^0.3"
