@@ -32,6 +32,10 @@ pub struct Wheels {
 }
 
 impl WheelsBuilder {
+    pub fn new() -> Self {
+        Self { wheels: Vec::new(), }
+    }
+
     pub fn add_wheel_ref(&mut self, wheel_ref: WheelRef) -> &mut Self {
         self.wheels.push(wheel_ref);
         self
