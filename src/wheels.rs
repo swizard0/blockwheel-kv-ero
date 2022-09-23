@@ -11,6 +11,12 @@ use crate::{
     },
 };
 
+pub use blockwheel_kv::{
+    wheels::{
+        WheelFilename,
+    },
+};
+
 #[derive(Debug)]
 pub enum Error {
     NoWheelsParams,
@@ -19,7 +25,7 @@ pub enum Error {
 }
 
 pub struct WheelRef {
-    pub blockwheel_filename: blockwheel_kv::wheels::WheelFilename,
+    pub blockwheel_filename: WheelFilename,
     pub blockwheel_fs_params: blockwheel_fs::Params,
 }
 
