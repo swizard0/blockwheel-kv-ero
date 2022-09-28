@@ -37,9 +37,17 @@ pub struct Wheels {
     wheels: Vec<WheelRef>,
 }
 
+pub type WheelsJob = blockwheel_fs::job::Job<blockwheel_kv::wheels::WheelAccessPolicy<AccessPolicy>>;
+
+impl Default for WheelsBuilder {
+    fn default() -> Self {
+        Self { wheels: Vec::new(), }
+    }
+}
+
 impl WheelsBuilder {
     pub fn new() -> Self {
-        Self { wheels: Vec::new(), }
+        Self::default()
     }
 
     pub fn add_wheel_ref(&mut self, wheel_ref: WheelRef) -> &mut Self {
