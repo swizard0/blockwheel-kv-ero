@@ -53,6 +53,8 @@ pub enum Error {
     FtdVersklaven(arbeitssklave::Error),
     RequestInfoBefehl(arbeitssklave::Error),
     RequestInsertBefehl(arbeitssklave::Error),
+    RequestLookupSingleBefehl(arbeitssklave::Error),
+    RequestLookupRangeBefehl(arbeitssklave::Error),
     RequestRemoveBefehl(arbeitssklave::Error),
     RequestFlushBefehl(arbeitssklave::Error),
     LookupRangeNext(komm::Error),
@@ -216,7 +218,7 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                         ),
                         &edeltraud::ThreadPoolMap::new(&thread_pool),
                     )
-                    .map_err(Error::RequestInsertBefehl)?;
+                    .map_err(Error::RequestLookupSingleBefehl)?;
             },
             Event::Request(Some(
                 proto::Request::LookupRange(proto::RequestLookupKind::Range(
@@ -248,7 +250,7 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                             ),
                             &edeltraud::ThreadPoolMap::new(&thread_pool),
                         )
-                        .map_err(Error::RequestInsertBefehl)?;
+                        .map_err(Error::RequestLookupRangeBefehl)?;
                     loop {
                         match kv_items_stream_rx.await {
                             Ok(blockwheel_kv::KeyValueStreamItem::KeyValue { key_value_pair, next, }) => {
