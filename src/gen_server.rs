@@ -259,7 +259,7 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                                     return Ok(());
                                 }
                                 (kv_items_stream_tx, kv_items_stream_rx) = oneshot::channel();
-                                next.next(
+                                next.demand(
                                     ftd_sendegeraet.rueckkopplung(
                                         ftd_sklave::LookupKind::Range(
                                             ftd_sklave::LookupKindRange { kv_items_stream_tx, },

@@ -51,6 +51,12 @@ pub struct Pid {
     request_tx: mpsc::Sender<proto::Request>,
 }
 
+impl Default for GenServer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GenServer {
     pub fn new() -> GenServer {
         let (request_tx, request_rx) = mpsc::channel(0);
