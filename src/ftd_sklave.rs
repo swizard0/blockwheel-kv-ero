@@ -84,13 +84,13 @@ fn run_job<P>(mut sklave_job: SklaveJob, _thread_pool: &P) -> Result<(), Error> 
                     match befehl {
                         Order::InfoCancel(komm::UmschlagAbbrechen { .. }) =>
                             return Err(Error::GenServerIsLostOnRequestInfo),
-                        Order::Info(komm::Umschlag { payload: info, stamp: reply_tx, }) =>
+                        Order::Info(komm::Umschlag { inhalt: info, stamp: reply_tx, }) =>
                             if let Err(_send_error) = reply_tx.send(info) {
                                 log::debug!("client is gone during RequestInfo");
                             },
                         Order::InsertCancel(komm::UmschlagAbbrechen { .. }) =>
                             return Err(Error::GenServerIsLostOnRequestInsert),
-                        Order::Insert(komm::Umschlag { payload: inserted, stamp: reply_tx, }) =>
+                        Order::Insert(komm::Umschlag { inhalt: inserted, stamp: reply_tx, }) =>
                             if let Err(_send_error) = reply_tx.send(inserted) {
                                 log::debug!("client is gone during RequestInsert");
                             },
@@ -98,14 +98,14 @@ fn run_job<P>(mut sklave_job: SklaveJob, _thread_pool: &P) -> Result<(), Error> 
                             return Err(Error::GenServerIsLostOnRequestLookupRange),
                         Order::LookupRange(komm::Umschlag {
                             stamp: LookupKind::Single(LookupKindSingle { reply_tx, }),
-                            payload: blockwheel_kv::KeyValueStreamItem::NoMore,
+                            inhalt: blockwheel_kv::KeyValueStreamItem::NoMore,
                         }) =>
                             if let Err(_send_error) = reply_tx.send(None) {
                                 log::debug!("client is gone during RequestLookup (None)");
                             },
                         Order::LookupRange(komm::Umschlag {
                             stamp: LookupKind::Single(LookupKindSingle { reply_tx, }),
-                            payload: blockwheel_kv::KeyValueStreamItem::KeyValue {
+                            inhalt: blockwheel_kv::KeyValueStreamItem::KeyValue {
                                 key_value_pair,
                                 ..
                             },
@@ -115,20 +115,20 @@ fn run_job<P>(mut sklave_job: SklaveJob, _thread_pool: &P) -> Result<(), Error> 
                             },
                         Order::LookupRange(komm::Umschlag {
                             stamp: LookupKind::Range(LookupKindRange { kv_items_stream_tx, }),
-                            payload: key_value_stream_item,
+                            inhalt: key_value_stream_item,
                         }) =>
                             if let Err(_send_error) = kv_items_stream_tx.send(key_value_stream_item) {
                                 log::debug!("lookup range process is gone during RequestLookupRange");
                             },
                         Order::RemoveCancel(komm::UmschlagAbbrechen { .. }) =>
                             return Err(Error::GenServerIsLostOnRequestRemove),
-                        Order::Remove(komm::Umschlag { payload: removed, stamp: reply_tx, }) =>
+                        Order::Remove(komm::Umschlag { inhalt: removed, stamp: reply_tx, }) =>
                             if let Err(_send_error) = reply_tx.send(removed) {
                                 log::debug!("client is gone during RequestRemove");
                             },
                         Order::FlushCancel(komm::UmschlagAbbrechen { .. }) =>
                             return Err(Error::GenServerIsLostOnRequestFlush),
-                        Order::Flushed(komm::Umschlag { payload: Flushed, stamp: reply_tx, }) =>
+                        Order::Flushed(komm::Umschlag { inhalt: Flushed, stamp: reply_tx, }) =>
                             if let Err(_send_error) = reply_tx.send(Flushed) {
                                 log::debug!("client is gone during RequestFlush");
                             },
