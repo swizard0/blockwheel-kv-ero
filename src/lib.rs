@@ -39,7 +39,7 @@ pub mod wheels;
 mod proto;
 mod gen_server;
 mod ftd_sklave;
-mod access_policy;
+mod echo_policy;
 
 pub struct GenServer {
     request_tx: mpsc::Sender<proto::Request>,
@@ -81,7 +81,7 @@ impl GenServer {
         wheels: wheels::Wheels,
         thread_pool: P,
     )
-    where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
+    where P: edeltraud::ThreadPool<job::Job> + Clone + Send + Sync + 'static,
     {
         gen_server::run(
             self.fused_request_rx,

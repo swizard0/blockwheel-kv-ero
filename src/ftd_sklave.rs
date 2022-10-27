@@ -1,3 +1,9 @@
+use std::{
+    collections::{
+        HashMap,
+    },
+};
+
 use futures::{
     channel::{
         oneshot,
@@ -12,8 +18,8 @@ use crate::{
     kv,
     job,
     proto,
-    access_policy::{
-        AccessPolicy,
+    echo_policy::{
+        EchoPolicy,
     },
     Info,
     Inserted,
@@ -29,14 +35,19 @@ pub enum Order {
     InsertCancel(komm::UmschlagAbbrechen<proto::RequestInsertReplyTx>),
     Insert(komm::Umschlag<Inserted, proto::RequestInsertReplyTx>),
     LookupRangeCancel(komm::UmschlagAbbrechen<LookupKind>),
-    LookupRange(komm::Umschlag<blockwheel_kv::KeyValueStreamItem<AccessPolicy>, LookupKind>),
+    LookupRange(komm::Umschlag<komm::Streamzeug<kv::KeyValuePair<kv::Value>>, LookupKind>),
     RemoveCancel(komm::UmschlagAbbrechen<proto::RequestRemoveReplyTx>),
     Remove(komm::Umschlag<Removed, proto::RequestRemoveReplyTx>),
     FlushCancel(komm::UmschlagAbbrechen<proto::RequestFlushReplyTx>),
     Flushed(komm::Umschlag<Flushed, proto::RequestFlushReplyTx>),
+
+    RegisterStream { stream: blockwheel_kv::LookupRangeStream<EchoPolicy>, },
 }
 
-pub struct Welt;
+#[derive(Default)]
+pub struct Welt {
+    streams: HashMap<komm::StreamId, blockwheel_kv::LookupRangeStream<EchoPolicy>>,
+}
 
 pub enum LookupKind {
     Single(LookupKindSingle),
@@ -48,7 +59,7 @@ pub struct LookupKindSingle {
 }
 
 pub struct LookupKindRange {
-    pub kv_items_stream_tx: oneshot::Sender<blockwheel_kv::KeyValueStreamItem<AccessPolicy>>,
+    pub kv_items_stream_tx: oneshot::Sender<komm::Streamzeug<kv::KeyValuePair<kv::Value>>>,
 }
 
 pub fn job<P>(sklave_job: SklaveJob, thread_pool: &P) where P: edeltraud::ThreadPool<job::Job> {
@@ -98,26 +109,36 @@ fn run_job<P>(mut sklave_job: SklaveJob, _thread_pool: &P) -> Result<(), Error> 
                             return Err(Error::GenServerIsLostOnRequestLookupRange),
                         Order::LookupRange(komm::Umschlag {
                             stamp: LookupKind::Single(LookupKindSingle { reply_tx, }),
-                            inhalt: blockwheel_kv::KeyValueStreamItem::NoMore,
-                        }) =>
+                            inhalt: komm::Streamzeug::NichtMehr(mehr),
+                        }) => {
+                            let sklavenwelt = befehle.sklavenwelt_mut();
+                            let prev = sklavenwelt.streams.remove(mehr.stream_id());
+                            assert!(prev.is_some());
+
                             if let Err(_send_error) = reply_tx.send(None) {
                                 log::debug!("client is gone during RequestLookup (None)");
-                            },
+                            }
+                        },
                         Order::LookupRange(komm::Umschlag {
                             stamp: LookupKind::Single(LookupKindSingle { reply_tx, }),
-                            inhalt: blockwheel_kv::KeyValueStreamItem::KeyValue {
-                                key_value_pair,
-                                ..
+                            inhalt: komm::Streamzeug::Zeug {
+                                zeug: key_value_pair,
+                                mehr,
                             },
-                        }) =>
+                        }) => {
+                            let sklavenwelt = befehle.sklavenwelt_mut();
+                            let prev = sklavenwelt.streams.remove(mehr.stream_id());
+                            assert!(prev.is_some());
+
                             if let Err(_send_error) = reply_tx.send(Some(key_value_pair.value_cell)) {
                                 log::debug!("client is gone during RequestLookup (Some)");
-                            },
+                            }
+                        },
                         Order::LookupRange(komm::Umschlag {
                             stamp: LookupKind::Range(LookupKindRange { kv_items_stream_tx, }),
-                            inhalt: key_value_stream_item,
+                            inhalt: streamzeug,
                         }) =>
-                            if let Err(_send_error) = kv_items_stream_tx.send(key_value_stream_item) {
+                            if let Err(_send_error) = kv_items_stream_tx.send(streamzeug) {
                                 log::debug!("lookup range process is gone during RequestLookupRange");
                             },
                         Order::RemoveCancel(komm::UmschlagAbbrechen { .. }) =>
@@ -132,6 +153,11 @@ fn run_job<P>(mut sklave_job: SklaveJob, _thread_pool: &P) -> Result<(), Error> 
                             if let Err(_send_error) = reply_tx.send(Flushed) {
                                 log::debug!("client is gone during RequestFlush");
                             },
+                        Order::RegisterStream { stream, } => {
+                            let sklavenwelt = befehle.sklavenwelt_mut();
+                            let prev = sklavenwelt.streams.insert(stream.stream_id().clone(), stream);
+                            assert!(prev.is_none());
+                        },
                     }
                 },
                 arbeitssklave::SklavenBefehl::Ende { sklave_job: next_sklave_job, } => {
@@ -173,8 +199,8 @@ impl From<komm::UmschlagAbbrechen<LookupKind>> for Order {
     }
 }
 
-impl From<komm::Umschlag<blockwheel_kv::KeyValueStreamItem<AccessPolicy>, LookupKind>> for Order {
-    fn from(v: komm::Umschlag<blockwheel_kv::KeyValueStreamItem<AccessPolicy>, LookupKind>) -> Order {
+impl From<komm::Umschlag<komm::Streamzeug<kv::KeyValuePair<kv::Value>>, LookupKind>> for Order {
+    fn from(v: komm::Umschlag<komm::Streamzeug<kv::KeyValuePair<kv::Value>>, LookupKind>) -> Order {
         Order::LookupRange(v)
     }
 }

@@ -37,8 +37,8 @@ use crate::{
     wheels,
     version,
     ftd_sklave,
-    access_policy::{
-        AccessPolicy,
+    echo_policy::{
+        EchoPolicy,
     },
     Params,
     LookupRange,
@@ -51,14 +51,15 @@ pub enum Error {
     BlockwheelKvVersklaven(blockwheel_kv::Error),
     FtdSendegeraetStarten(komm::Error),
     FtdVersklaven(arbeitssklave::Error),
-    RequestInfoBefehl(arbeitssklave::Error),
-    RequestInsertBefehl(arbeitssklave::Error),
-    RequestLookupSingleBefehl(arbeitssklave::Error),
-    RequestLookupRangeBefehl(arbeitssklave::Error),
-    RequestRemoveBefehl(arbeitssklave::Error),
-    RequestFlushBefehl(arbeitssklave::Error),
-    LookupRangeNext(komm::Error),
+    RequestInfoBefehl(blockwheel_kv::Error),
+    RequestInsertBefehl(blockwheel_kv::Error),
+    RequestLookupSingleBefehl(blockwheel_kv::Error),
+    RequestLookupRangeBefehl(blockwheel_kv::Error),
+    RequestRemoveBefehl(blockwheel_kv::Error),
+    RequestFlushBefehl(blockwheel_kv::Error),
+    LookupRangeNext(blockwheel_kv::Error),
     BlockwheelKvMeisterHasGoneDuringLookupRange,
+    RegisterStream(arbeitssklave::Error),
 }
 
 pub async fn run<P>(
@@ -70,7 +71,7 @@ pub async fn run<P>(
     wheels: wheels::Wheels,
     thread_pool: P,
 )
-where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
+where P: edeltraud::ThreadPool<job::Job> + Clone + Send + Sync + 'static,
 {
     let terminate_result =
         restart::restartable(
@@ -119,7 +120,7 @@ impl<P> From<Error> for ErrorSeverity<State<P>, Error> {
 }
 
 async fn busyloop_init<P>(supervisor_pid: SupervisorPid, state: State<P>) -> Result<(), ErrorSeverity<State<P>, Error>>
-where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
+where P: edeltraud::ThreadPool<job::Job> + Clone + Send + Sync + 'static,
 {
     let wheels = state.wheels
         .create(&state.blocks_pool, &state.thread_pool)
@@ -138,13 +139,14 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
     let ftd_sklave_freie = arbeitssklave::Freie::new();
     let ftd_sendegeraet = komm::Sendegeraet::starten(&ftd_sklave_freie, state.thread_pool.clone())
         .map_err(Error::FtdSendegeraetStarten)?;
-    let _ftd_sklave_meister = ftd_sklave_freie
-        .versklaven(ftd_sklave::Welt, &state.thread_pool)
+    let ftd_sklave_meister = ftd_sklave_freie
+        .versklaven(ftd_sklave::Welt::default(), &state.thread_pool)
         .map_err(Error::FtdVersklaven)?;
 
     busyloop(
         supervisor_pid,
         blockwheel_kv_meister,
+        ftd_sklave_meister,
         ftd_sendegeraet,
         state.fused_request_rx,
         state.thread_pool,
@@ -153,7 +155,8 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
 
 async fn busyloop<P>(
     _supervisor_pid: SupervisorPid,
-    blockwheel_kv_meister: blockwheel_kv::Meister<AccessPolicy>,
+    blockwheel_kv_meister: blockwheel_kv::Meister<EchoPolicy>,
+    ftd_sklave_meister: arbeitssklave::Meister<ftd_sklave::Welt, ftd_sklave::Order>,
     ftd_sendegeraet: komm::Sendegeraet<ftd_sklave::Order>,
     mut fused_request_rx: stream::Fuse<mpsc::Receiver<proto::Request>>,
     thread_pool: P,
@@ -162,7 +165,6 @@ async fn busyloop<P>(
 where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
 {
     let mut lookup_tasks = FuturesUnordered::new();
-
     loop {
         enum Event<R, T> {
             Request(R),
@@ -191,7 +193,11 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                     )
                     .map_err(Error::RequestInfoBefehl)?;
             },
-            Event::Request(Some(proto::Request::Insert(proto::RequestInsert { key, value, reply_tx, }))) => {
+            Event::Request(Some(proto::Request::Insert(proto::RequestInsert {
+                key,
+                value,
+                reply_tx,
+            }))) => {
                 blockwheel_kv_meister
                     .insert(
                         key,
@@ -208,7 +214,7 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                     ),
                 ),
             )) => {
-                blockwheel_kv_meister
+                let stream = blockwheel_kv_meister
                     .lookup_range(
                         key.clone() ..= key,
                         ftd_sendegeraet.rueckkopplung(
@@ -219,6 +225,12 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                         &edeltraud::ThreadPoolMap::new(&thread_pool),
                     )
                     .map_err(Error::RequestLookupSingleBefehl)?;
+                ftd_sklave_meister
+                    .befehl(
+                        ftd_sklave::Order::RegisterStream { stream, },
+                        &thread_pool,
+                    )
+                    .map_err(Error::RegisterStream)?;
             },
             Event::Request(Some(
                 proto::Request::LookupRange(proto::RequestLookupKind::Range(
@@ -239,8 +251,11 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                         return Ok(());
                     }
 
-                    let (mut kv_items_stream_tx, mut kv_items_stream_rx) = oneshot::channel();
-                    blockwheel_kv_meister
+                    let (
+                        mut kv_items_stream_tx,
+                        mut kv_items_stream_rx,
+                    ) = oneshot::channel();
+                    let stream = blockwheel_kv_meister
                         .lookup_range(
                             (range_from, range_to),
                             ftd_sendegeraet.rueckkopplung(
@@ -253,21 +268,25 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                         .map_err(Error::RequestLookupRangeBefehl)?;
                     loop {
                         match kv_items_stream_rx.await {
-                            Ok(blockwheel_kv::KeyValueStreamItem::KeyValue { key_value_pair, next, }) => {
+                            Ok(komm::Streamzeug::Zeug {
+                                zeug: key_value_pair,
+                                mehr,
+                            }) => {
                                 if let Err(_send_error) = key_values_tx.send(KeyValueStreamItem::KeyValue(key_value_pair)).await {
                                     log::debug!("client has dropped kv items stream tx, canceling");
                                     return Ok(());
                                 }
                                 (kv_items_stream_tx, kv_items_stream_rx) = oneshot::channel();
-                                next.demand(
-                                    ftd_sendegeraet.rueckkopplung(
+                                let stream_echo = ftd_sendegeraet
+                                    .rueckkopplung(
                                         ftd_sklave::LookupKind::Range(
                                             ftd_sklave::LookupKindRange { kv_items_stream_tx, },
                                         ),
-                                    ),
-                                ).map_err(Error::LookupRangeNext)?;
+                                    );
+                                stream.next(stream_echo, mehr.into())
+                                    .map_err(Error::LookupRangeNext)?;
                             },
-                            Ok(blockwheel_kv::KeyValueStreamItem::NoMore) => {
+                            Ok(komm::Streamzeug::NichtMehr(..)) => {
                                 if let Err(_send_error) = key_values_tx.send(KeyValueStreamItem::NoMore).await {
                                     log::debug!("client has dropped kv items stream tx, canceling");
                                 }

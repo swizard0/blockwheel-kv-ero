@@ -6,8 +6,8 @@ use alloc_pool::{
 
 use crate::{
     job,
-    access_policy::{
-        AccessPolicy,
+    echo_policy::{
+        EchoPolicy,
     },
 };
 
@@ -37,7 +37,7 @@ pub struct Wheels {
     wheels: Vec<WheelRef>,
 }
 
-pub type WheelsJob = blockwheel_fs::job::Job<blockwheel_kv::wheels::WheelAccessPolicy<AccessPolicy>>;
+pub type WheelsJob = blockwheel_fs::job::Job<blockwheel_kv::wheels::WheelEchoPolicy<EchoPolicy>>;
 
 impl Default for WheelsBuilder {
     fn default() -> Self {
@@ -70,7 +70,7 @@ impl Wheels {
         blocks_pool: &BytesPool,
         thread_pool: &P,
     )
-        -> Result<blockwheel_kv::wheels::Wheels<AccessPolicy>, Error>
+        -> Result<blockwheel_kv::wheels::Wheels<EchoPolicy>, Error>
     where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static
     {
         let mut wheels_builder = blockwheel_kv::wheels::WheelsBuilder::new();
