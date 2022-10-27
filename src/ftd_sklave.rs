@@ -1,9 +1,3 @@
-use std::{
-    collections::{
-        HashMap,
-    },
-};
-
 use futures::{
     channel::{
         oneshot,
@@ -18,9 +12,6 @@ use crate::{
     kv,
     job,
     proto,
-    echo_policy::{
-        EchoPolicy,
-    },
     Info,
     Inserted,
     Removed,
@@ -40,14 +31,10 @@ pub enum Order {
     Remove(komm::Umschlag<Removed, proto::RequestRemoveReplyTx>),
     FlushCancel(komm::UmschlagAbbrechen<proto::RequestFlushReplyTx>),
     Flushed(komm::Umschlag<Flushed, proto::RequestFlushReplyTx>),
-
-    RegisterStream { stream: blockwheel_kv::LookupRangeStream<EchoPolicy>, },
 }
 
 #[derive(Default)]
-pub struct Welt {
-    streams: HashMap<komm::StreamId, blockwheel_kv::LookupRangeStream<EchoPolicy>>,
-}
+pub struct Welt;
 
 pub enum LookupKind {
     Single(LookupKindSingle),
@@ -56,6 +43,7 @@ pub enum LookupKind {
 
 pub struct LookupKindSingle {
     pub reply_tx: oneshot::Sender<Option<kv::ValueCell<kv::Value>>>,
+    pub feedback_tx: oneshot::Sender<komm::StreamId>,
 }
 
 pub struct LookupKindRange {
@@ -75,6 +63,7 @@ pub enum Error {
     GenServerIsLostOnRequestInsert,
     GenServerIsLostOnRequestRemove,
     GenServerIsLostOnRequestFlush,
+    GenServerIsLostOnRequestLookupSingle,
     GenServerIsLostOnRequestLookupRange,
 }
 
@@ -108,30 +97,34 @@ fn run_job<P>(mut sklave_job: SklaveJob, _thread_pool: &P) -> Result<(), Error> 
                         Order::LookupRangeCancel(komm::UmschlagAbbrechen { .. }) =>
                             return Err(Error::GenServerIsLostOnRequestLookupRange),
                         Order::LookupRange(komm::Umschlag {
-                            stamp: LookupKind::Single(LookupKindSingle { reply_tx, }),
+                            stamp: LookupKind::Single(LookupKindSingle {
+                                reply_tx,
+                                feedback_tx,
+                            }),
                             inhalt: komm::Streamzeug::NichtMehr(mehr),
                         }) => {
-                            let sklavenwelt = befehle.sklavenwelt_mut();
-                            let prev = sklavenwelt.streams.remove(mehr.stream_id());
-                            assert!(prev.is_some());
-
                             if let Err(_send_error) = reply_tx.send(None) {
                                 log::debug!("client is gone during RequestLookup (None)");
                             }
+                            if let Err(_send_error) = feedback_tx.send(mehr.stream_id().clone()) {
+                                return Err(Error::GenServerIsLostOnRequestLookupSingle);
+                            }
                         },
                         Order::LookupRange(komm::Umschlag {
-                            stamp: LookupKind::Single(LookupKindSingle { reply_tx, }),
+                            stamp: LookupKind::Single(LookupKindSingle {
+                                reply_tx,
+                                feedback_tx,
+                            }),
                             inhalt: komm::Streamzeug::Zeug {
                                 zeug: key_value_pair,
                                 mehr,
                             },
                         }) => {
-                            let sklavenwelt = befehle.sklavenwelt_mut();
-                            let prev = sklavenwelt.streams.remove(mehr.stream_id());
-                            assert!(prev.is_some());
-
                             if let Err(_send_error) = reply_tx.send(Some(key_value_pair.value_cell)) {
                                 log::debug!("client is gone during RequestLookup (Some)");
+                            }
+                            if let Err(_send_error) = feedback_tx.send(mehr.stream_id().clone()) {
+                                return Err(Error::GenServerIsLostOnRequestLookupSingle);
                             }
                         },
                         Order::LookupRange(komm::Umschlag {
@@ -153,11 +146,6 @@ fn run_job<P>(mut sklave_job: SklaveJob, _thread_pool: &P) -> Result<(), Error> 
                             if let Err(_send_error) = reply_tx.send(Flushed) {
                                 log::debug!("client is gone during RequestFlush");
                             },
-                        Order::RegisterStream { stream, } => {
-                            let sklavenwelt = befehle.sklavenwelt_mut();
-                            let prev = sklavenwelt.streams.insert(stream.stream_id().clone(), stream);
-                            assert!(prev.is_none());
-                        },
                     }
                 },
                 arbeitssklave::SklavenBefehl::Ende { sklave_job: next_sklave_job, } => {

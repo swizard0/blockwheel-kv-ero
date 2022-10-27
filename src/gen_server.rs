@@ -7,6 +7,9 @@ use futures::{
         self,
         FuturesUnordered,
     },
+    future::{
+        Either,
+    },
     select,
     SinkExt,
     StreamExt,
@@ -58,8 +61,8 @@ pub enum Error {
     RequestRemoveBefehl(blockwheel_kv::Error),
     RequestFlushBefehl(blockwheel_kv::Error),
     LookupRangeNext(blockwheel_kv::Error),
+    BlockwheelKvMeisterHasGoneDuringLookupSingle,
     BlockwheelKvMeisterHasGoneDuringLookupRange,
-    RegisterStream(arbeitssklave::Error),
 }
 
 pub async fn run<P>(
@@ -156,7 +159,7 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + Sync + 'static,
 async fn busyloop<P>(
     _supervisor_pid: SupervisorPid,
     blockwheel_kv_meister: blockwheel_kv::Meister<EchoPolicy>,
-    ftd_sklave_meister: arbeitssklave::Meister<ftd_sklave::Welt, ftd_sklave::Order>,
+    _ftd_sklave_meister: arbeitssklave::Meister<ftd_sklave::Welt, ftd_sklave::Order>,
     ftd_sendegeraet: komm::Sendegeraet<ftd_sklave::Order>,
     mut fused_request_rx: stream::Fuse<mpsc::Receiver<proto::Request>>,
     thread_pool: P,
@@ -214,23 +217,28 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                     ),
                 ),
             )) => {
+                let (feedback_tx, feedback_rx) = oneshot::channel();
                 let stream = blockwheel_kv_meister
                     .lookup_range(
                         key.clone() ..= key,
                         ftd_sendegeraet.rueckkopplung(
                             ftd_sklave::LookupKind::Single(
-                                ftd_sklave::LookupKindSingle { reply_tx, },
+                                ftd_sklave::LookupKindSingle { reply_tx, feedback_tx, },
                             ),
                         ),
                         &edeltraud::ThreadPoolMap::new(&thread_pool),
                     )
                     .map_err(Error::RequestLookupSingleBefehl)?;
-                ftd_sklave_meister
-                    .befehl(
-                        ftd_sklave::Order::RegisterStream { stream, },
-                        &thread_pool,
-                    )
-                    .map_err(Error::RegisterStream)?;
+                lookup_tasks.push(Either::Left(async move {
+                    match feedback_rx.await {
+                        Ok(ref stream_id) => {
+                            assert!(stream_id == stream.stream_id());
+                            Ok(())
+                        },
+                        Err(oneshot::Canceled) =>
+                            Err(Error::BlockwheelKvMeisterHasGoneDuringLookupSingle),
+                    }
+                }));
             },
             Event::Request(Some(
                 proto::Request::LookupRange(proto::RequestLookupKind::Range(
@@ -244,7 +252,7 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                 let blockwheel_kv_meister = blockwheel_kv_meister.clone();
                 let ftd_sendegeraet = ftd_sendegeraet.clone();
                 let thread_pool = thread_pool.clone();
-                lookup_tasks.push(async move {
+                lookup_tasks.push(Either::Right(async move {
                     let (mut key_values_tx, key_values_rx) = mpsc::channel(0);
                     if let Err(_send_error) = reply_tx.send(LookupRange { key_values_rx, }) {
                         log::debug!("client has canceled lookup range request");
@@ -296,7 +304,7 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                                 return Err(Error::BlockwheelKvMeisterHasGoneDuringLookupRange),
                         }
                     }
-                });
+                }));
             },
             Event::Request(Some(proto::Request::Remove(proto::RequestRemove { key, reply_tx, }))) => {
                 blockwheel_kv_meister
