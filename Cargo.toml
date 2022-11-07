@@ -1,6 +1,6 @@
 [package]
 name = "blockwheel-kv-ero"
-version = "0.2.2"
+version = "0.2.3"
 authors = ["Alexey Voznyuk <me@swizard.info>"]
 description = "blockwheel-kv async frontend via ero."
 edition = "2021"
@@ -16,4 +16,5 @@ blockwheel-kv = { git = "https://github.com/swizard0/blockwheel-kv.git" }
 log = "^0.4"
 futures = "^0.3"
 
+[dev-dependencies]
 tokio = { version = "^1", features = ["full"] }

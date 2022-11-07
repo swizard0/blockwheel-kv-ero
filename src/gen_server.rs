@@ -167,7 +167,8 @@ async fn busyloop<P>(
     -> Result<(), ErrorSeverity<State<P>, Error>>
 where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
 {
-    let mut lookup_tasks = FuturesUnordered::new();
+    let mut lookup_tasks =
+        FuturesUnordered::new();
     loop {
         enum Event<R, T> {
             Request(R),
