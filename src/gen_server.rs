@@ -52,8 +52,7 @@ use crate::{
 pub enum Error {
     Wheels(wheels::Error),
     BlockwheelKvVersklaven(blockwheel_kv::Error),
-    FtdSendegeraetStarten(komm::Error),
-    FtdVersklaven(arbeitssklave::Error),
+    FtdVersklaven(arbeitssklave::komm::Error),
     RequestInfoBefehl(blockwheel_kv::Error),
     RequestInsertBefehl(blockwheel_kv::Error),
     RequestLookupSingleBefehl(blockwheel_kv::Error),
@@ -129,8 +128,8 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + Sync + 'static,
         .create(&state.blocks_pool, &state.thread_pool)
         .map_err(Error::Wheels)?;
 
-    let blockwheel_kv_meister = blockwheel_kv::Freie::new()
-        .versklaven(
+    let blockwheel_kv_meister =
+        blockwheel_kv::Meister::versklaven(
             state.params,
             state.blocks_pool,
             state.version_provider,
@@ -139,12 +138,14 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + Sync + 'static,
         )
         .map_err(Error::BlockwheelKvVersklaven)?;
 
-    let ftd_sklave_freie = arbeitssklave::Freie::new();
-    let ftd_sendegeraet = komm::Sendegeraet::starten(&ftd_sklave_freie, state.thread_pool.clone())
-        .map_err(Error::FtdSendegeraetStarten)?;
-    let ftd_sklave_meister = ftd_sklave_freie
-        .versklaven(ftd_sklave::Welt::default(), &state.thread_pool)
+    let ftd_sklave_meister =
+        arbeitssklave::Freie::new(
+            ftd_sklave::Welt::default(),
+        )
+        .versklaven_komm(&state.thread_pool)
         .map_err(Error::FtdVersklaven)?;
+    let ftd_sendegeraet =
+        ftd_sklave_meister.sendegeraet().clone();
 
     busyloop(
         supervisor_pid,
@@ -159,7 +160,7 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + Sync + 'static,
 async fn busyloop<P>(
     _supervisor_pid: SupervisorPid,
     blockwheel_kv_meister: blockwheel_kv::Meister<EchoPolicy>,
-    _ftd_sklave_meister: arbeitssklave::Meister<ftd_sklave::Welt, ftd_sklave::Order>,
+    _ftd_sklave_meister: arbeitssklave::komm::Meister<ftd_sklave::Welt, ftd_sklave::Order>,
     ftd_sendegeraet: komm::Sendegeraet<ftd_sklave::Order>,
     mut fused_request_rx: stream::Fuse<mpsc::Receiver<proto::Request>>,
     thread_pool: P,

@@ -76,8 +76,8 @@ impl Wheels {
         let mut wheels_builder = blockwheel_kv::wheels::WheelsBuilder::new();
 
         for WheelRef { blockwheel_filename, blockwheel_fs_params, } in self.wheels {
-            let meister = blockwheel_fs::Freie::new()
-                .versklaven(
+            let meister =
+                blockwheel_fs::Meister::versklaven(
                     blockwheel_fs_params,
                     blocks_pool.clone(),
                     &edeltraud::ThreadPoolMap::new(thread_pool.clone()),

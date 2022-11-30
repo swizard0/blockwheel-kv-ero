@@ -18,7 +18,7 @@ use crate::{
     Flushed,
 };
 
-pub type SklaveJob = arbeitssklave::SklaveJob<Welt, Order>;
+pub type SklaveJob = arbeitssklave::komm::SklaveJob<Welt, Order>;
 
 pub enum Order {
     InfoCancel(komm::UmschlagAbbrechen<proto::RequestInfoReplyTx>),
