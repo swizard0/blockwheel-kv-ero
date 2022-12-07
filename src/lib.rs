@@ -72,16 +72,20 @@ impl GenServer {
         }
     }
 
-    pub async fn run<P>(
+    pub async fn run<J>(
         self,
         parent_supervisor: ero::supervisor::SupervisorPid,
         params: Params,
         blocks_pool: BytesPool,
         version_provider: version::Provider,
         wheels: wheels::Wheels,
-        thread_pool: P,
+        thread_pool: edeltraud::Handle<J>,
     )
-    where P: edeltraud::ThreadPool<job::Job> + Clone + Send + Sync + 'static,
+    where J: From<blockwheel_fs::job::SklaveJob<blockwheel_kv::wheels::WheelEchoPolicy<echo_policy::EchoPolicy>>>,
+          J: From<blockwheel_kv::job::LookupRangeMergeSklaveJob<echo_policy::EchoPolicy>>,
+          J: From<blockwheel_kv::job::PerformerSklaveJob<echo_policy::EchoPolicy>>,
+          J: From<ftd_sklave::SklaveJob>,
+          J: Send + 'static,
     {
         gen_server::run(
             self.fused_request_rx,

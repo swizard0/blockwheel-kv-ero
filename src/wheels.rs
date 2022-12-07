@@ -5,7 +5,6 @@ use alloc_pool::{
 };
 
 use crate::{
-    job,
     echo_policy::{
         EchoPolicy,
     },
@@ -65,13 +64,14 @@ impl WheelsBuilder {
 }
 
 impl Wheels {
-    pub(crate) fn create<P>(
+    pub(crate) fn create<J>(
         self,
         blocks_pool: &BytesPool,
-        thread_pool: &P,
+        thread_pool: &edeltraud::Handle<J>,
     )
         -> Result<blockwheel_kv::wheels::Wheels<EchoPolicy>, Error>
-    where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static
+    where J: From<blockwheel_fs::job::SklaveJob<blockwheel_kv::wheels::WheelEchoPolicy<EchoPolicy>>>,
+          J: Send + 'static,
     {
         let mut wheels_builder = blockwheel_kv::wheels::WheelsBuilder::new();
 
@@ -80,7 +80,7 @@ impl Wheels {
                 blockwheel_fs::Meister::versklaven(
                     blockwheel_fs_params,
                     blocks_pool.clone(),
-                    &edeltraud::ThreadPoolMap::new(thread_pool.clone()),
+                    thread_pool,
                 )
                 .map_err(Error::BlockwheelFsVersklaven)?;
             wheels_builder = wheels_builder

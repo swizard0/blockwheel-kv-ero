@@ -35,7 +35,6 @@ use ero::{
 };
 
 use crate::{
-    job,
     proto,
     wheels,
     version,
@@ -52,7 +51,7 @@ use crate::{
 pub enum Error {
     Wheels(wheels::Error),
     BlockwheelKvVersklaven(blockwheel_kv::Error),
-    FtdVersklaven(arbeitssklave::komm::Error),
+    FtdVersklaven(arbeitssklave::Error),
     RequestInfoBefehl(blockwheel_kv::Error),
     RequestInsertBefehl(blockwheel_kv::Error),
     RequestLookupSingleBefehl(blockwheel_kv::Error),
@@ -64,16 +63,20 @@ pub enum Error {
     BlockwheelKvMeisterHasGoneDuringLookupRange,
 }
 
-pub async fn run<P>(
+pub async fn run<J>(
     fused_request_rx: stream::Fuse<mpsc::Receiver<proto::Request>>,
     parent_supervisor: SupervisorPid,
     params: Params,
     blocks_pool: BytesPool,
     version_provider: version::Provider,
     wheels: wheels::Wheels,
-    thread_pool: P,
+    thread_pool: edeltraud::Handle<J>,
 )
-where P: edeltraud::ThreadPool<job::Job> + Clone + Send + Sync + 'static,
+where J: From<blockwheel_fs::job::SklaveJob<blockwheel_kv::wheels::WheelEchoPolicy<EchoPolicy>>>,
+      J: From<blockwheel_kv::job::LookupRangeMergeSklaveJob<EchoPolicy>>,
+      J: From<blockwheel_kv::job::PerformerSklaveJob<EchoPolicy>>,
+      J: From<ftd_sklave::SklaveJob>,
+      J: Send + 'static,
 {
     let terminate_result =
         restart::restartable(
@@ -105,24 +108,28 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + Sync + 'static,
     }
 }
 
-struct State<P> {
+struct State<J> {
     parent_supervisor: SupervisorPid,
     params: Params,
     blocks_pool: BytesPool,
     version_provider: version::Provider,
     wheels: wheels::Wheels,
-    thread_pool: P,
+    thread_pool: edeltraud::Handle<J>,
     fused_request_rx: stream::Fuse<mpsc::Receiver<proto::Request>>,
 }
 
-impl<P> From<Error> for ErrorSeverity<State<P>, Error> {
+impl<J> From<Error> for ErrorSeverity<State<J>, Error> {
     fn from(error: Error) -> Self {
         ErrorSeverity::Fatal(error)
     }
 }
 
-async fn busyloop_init<P>(supervisor_pid: SupervisorPid, state: State<P>) -> Result<(), ErrorSeverity<State<P>, Error>>
-where P: edeltraud::ThreadPool<job::Job> + Clone + Send + Sync + 'static,
+async fn busyloop_init<J>(supervisor_pid: SupervisorPid, state: State<J>) -> Result<(), ErrorSeverity<State<J>, Error>>
+where J: From<blockwheel_fs::job::SklaveJob<blockwheel_kv::wheels::WheelEchoPolicy<EchoPolicy>>>,
+      J: From<blockwheel_kv::job::LookupRangeMergeSklaveJob<EchoPolicy>>,
+      J: From<blockwheel_kv::job::PerformerSklaveJob<EchoPolicy>>,
+      J: From<ftd_sklave::SklaveJob>,
+      J: Send + 'static,
 {
     let wheels = state.wheels
         .create(&state.blocks_pool, &state.thread_pool)
@@ -134,18 +141,17 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + Sync + 'static,
             state.blocks_pool,
             state.version_provider,
             wheels,
-            &edeltraud::ThreadPoolMap::new(state.thread_pool.clone()),
+            &state.thread_pool,
         )
         .map_err(Error::BlockwheelKvVersklaven)?;
 
-    let ftd_sklave_meister =
-        arbeitssklave::Freie::new(
-            ftd_sklave::Welt::default(),
-        )
-        .versklaven_komm(&state.thread_pool)
+    let ftd_sklave_meister = arbeitssklave::Freie::new()
+        .versklaven(ftd_sklave::Welt::default(), &state.thread_pool)
         .map_err(Error::FtdVersklaven)?;
-    let ftd_sendegeraet =
-        ftd_sklave_meister.sendegeraet().clone();
+    let ftd_sendegeraet = komm::Sendegeraet::starten(
+        ftd_sklave_meister.clone(),
+        state.thread_pool.clone(),
+    );
 
     busyloop(
         supervisor_pid,
@@ -157,16 +163,18 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + Sync + 'static,
     ).await
 }
 
-async fn busyloop<P>(
+async fn busyloop<J>(
     _supervisor_pid: SupervisorPid,
     blockwheel_kv_meister: blockwheel_kv::Meister<EchoPolicy>,
-    _ftd_sklave_meister: arbeitssklave::komm::Meister<ftd_sklave::Welt, ftd_sklave::Order>,
+    _ftd_sklave_meister: arbeitssklave::Meister<ftd_sklave::Welt, ftd_sklave::Order>,
     ftd_sendegeraet: komm::Sendegeraet<ftd_sklave::Order>,
     mut fused_request_rx: stream::Fuse<mpsc::Receiver<proto::Request>>,
-    thread_pool: P,
+    thread_pool: edeltraud::Handle<J>,
 )
-    -> Result<(), ErrorSeverity<State<P>, Error>>
-where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
+    -> Result<(), ErrorSeverity<State<J>, Error>>
+where J: From<blockwheel_kv::job::PerformerSklaveJob<EchoPolicy>>,
+      J: From<blockwheel_kv::job::LookupRangeMergeSklaveJob<EchoPolicy>>,
+      J: Send + 'static,
 {
     let mut lookup_tasks =
         FuturesUnordered::new();
@@ -194,7 +202,7 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                 blockwheel_kv_meister
                     .info(
                         ftd_sendegeraet.rueckkopplung(reply_tx),
-                        &edeltraud::ThreadPoolMap::new(&thread_pool),
+                        &thread_pool,
                     )
                     .map_err(Error::RequestInfoBefehl)?;
             },
@@ -208,7 +216,7 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                         key,
                         value,
                         ftd_sendegeraet.rueckkopplung(reply_tx),
-                        &edeltraud::ThreadPoolMap::new(&thread_pool),
+                        &thread_pool,
                     )
                     .map_err(Error::RequestInsertBefehl)?;
             },
@@ -228,7 +236,7 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                                 ftd_sklave::LookupKindSingle { reply_tx, feedback_tx, },
                             ),
                         ),
-                        &edeltraud::ThreadPoolMap::new(&thread_pool),
+                        &thread_pool,
                     )
                     .map_err(Error::RequestLookupSingleBefehl)?;
                 lookup_tasks.push(Either::Left(async move {
@@ -273,7 +281,7 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                                     ftd_sklave::LookupKindRange { kv_items_stream_tx, },
                                 ),
                             ),
-                            &edeltraud::ThreadPoolMap::new(&thread_pool),
+                            &thread_pool,
                         )
                         .map_err(Error::RequestLookupRangeBefehl)?;
                     loop {
@@ -313,7 +321,7 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                     .remove(
                         key,
                         ftd_sendegeraet.rueckkopplung(reply_tx),
-                        &edeltraud::ThreadPoolMap::new(&thread_pool),
+                        &thread_pool,
                     )
                     .map_err(Error::RequestRemoveBefehl)?;
             },
@@ -321,7 +329,7 @@ where P: edeltraud::ThreadPool<job::Job> + Clone + Send + 'static,
                 blockwheel_kv_meister
                     .flush(
                         ftd_sendegeraet.rueckkopplung(reply_tx),
-                        &edeltraud::ThreadPoolMap::new(&thread_pool),
+                        &thread_pool,
                     )
                     .map_err(Error::RequestFlushBefehl)?;
             },

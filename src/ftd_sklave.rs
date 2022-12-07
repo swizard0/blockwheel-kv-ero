@@ -10,7 +10,6 @@ use arbeitssklave::{
 
 use crate::{
     kv,
-    job,
     proto,
     Info,
     Inserted,
@@ -18,7 +17,7 @@ use crate::{
     Flushed,
 };
 
-pub type SklaveJob = arbeitssklave::komm::SklaveJob<Welt, Order>;
+pub type SklaveJob = arbeitssklave::SklaveJob<Welt, Order>;
 
 pub enum Order {
     InfoCancel(komm::UmschlagAbbrechen<proto::RequestInfoReplyTx>),
@@ -50,7 +49,7 @@ pub struct LookupKindRange {
     pub kv_items_stream_tx: oneshot::Sender<komm::Streamzeug<kv::KeyValuePair<kv::Value>>>,
 }
 
-pub fn job<P>(sklave_job: SklaveJob, thread_pool: &P) where P: edeltraud::ThreadPool<job::Job> {
+pub fn job<J>(sklave_job: SklaveJob, thread_pool: &edeltraud::Handle<J>) {
     if let Err(error) = run_job(sklave_job, thread_pool) {
         log::error!("job terminated with error: {:?}", error);
     }
@@ -67,7 +66,7 @@ pub enum Error {
     GenServerIsLostOnRequestLookupRange,
 }
 
-fn run_job<P>(mut sklave_job: SklaveJob, _thread_pool: &P) -> Result<(), Error> where P: edeltraud::ThreadPool<job::Job> {
+fn run_job<J>(mut sklave_job: SklaveJob, _thread_pool: &edeltraud::Handle<J>) -> Result<(), Error> {
     loop {
         let mut befehle = match sklave_job.zu_ihren_diensten() {
             Ok(arbeitssklave::Gehorsam::Machen { befehle, }) =>
