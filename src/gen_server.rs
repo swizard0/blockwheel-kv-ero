@@ -150,7 +150,7 @@ where J: From<job::BlockwheelFsSklaveJob>,
         .versklaven(ftd_sklave::Welt::default(), &state.thread_pool)
         .map_err(Error::FtdVersklaven)?;
     let ftd_sendegeraet = komm::Sendegeraet::starten(
-        ftd_sklave_meister.clone(),
+        &ftd_sklave_meister,
         state.thread_pool.clone(),
     );
 
