@@ -5,6 +5,7 @@ use alloc_pool::{
 };
 
 use crate::{
+    job,
     echo_policy::{
         EchoPolicy,
     },
@@ -36,7 +37,7 @@ pub struct Wheels {
     wheels: Vec<WheelRef>,
 }
 
-pub type WheelsJob = blockwheel_fs::job::Job<blockwheel_kv::wheels::WheelEchoPolicy<EchoPolicy>>;
+pub type WheelsJob = job::BlockwheelFsJob;
 
 impl Default for WheelsBuilder {
     fn default() -> Self {
@@ -70,7 +71,7 @@ impl Wheels {
         thread_pool: &edeltraud::Handle<J>,
     )
         -> Result<blockwheel_kv::wheels::Wheels<EchoPolicy>, Error>
-    where J: From<blockwheel_fs::job::SklaveJob<blockwheel_kv::wheels::WheelEchoPolicy<EchoPolicy>>>,
+    where J: From<job::BlockwheelFsSklaveJob>,
           J: Send + 'static,
     {
         let mut wheels_builder = blockwheel_kv::wheels::WheelsBuilder::new();

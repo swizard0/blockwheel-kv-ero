@@ -1,6 +1,6 @@
 [package]
 name = "blockwheel-kv-ero"
-version = "0.2.6"
+version = "0.2.7"
 authors = ["Alexey Voznyuk <me@swizard.info>"]
 description = "blockwheel-kv async frontend via ero."
 edition = "2021"

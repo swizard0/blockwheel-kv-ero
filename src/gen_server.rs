@@ -35,6 +35,7 @@ use ero::{
 };
 
 use crate::{
+    job,
     proto,
     wheels,
     version,
@@ -72,10 +73,10 @@ pub async fn run<J>(
     wheels: wheels::Wheels,
     thread_pool: edeltraud::Handle<J>,
 )
-where J: From<blockwheel_fs::job::SklaveJob<blockwheel_kv::wheels::WheelEchoPolicy<EchoPolicy>>>,
-      J: From<blockwheel_kv::job::LookupRangeMergeSklaveJob<EchoPolicy>>,
-      J: From<blockwheel_kv::job::PerformerSklaveJob<EchoPolicy>>,
-      J: From<ftd_sklave::SklaveJob>,
+where J: From<job::BlockwheelFsSklaveJob>,
+      J: From<job::BlockwheelKvLookupRangeMergeSklaveJob>,
+      J: From<job::BlockwheelKvPerformerSklaveJob>,
+      J: From<job::FtdSklaveJob>,
       J: Send + 'static,
 {
     let terminate_result =
@@ -125,10 +126,10 @@ impl<J> From<Error> for ErrorSeverity<State<J>, Error> {
 }
 
 async fn busyloop_init<J>(supervisor_pid: SupervisorPid, state: State<J>) -> Result<(), ErrorSeverity<State<J>, Error>>
-where J: From<blockwheel_fs::job::SklaveJob<blockwheel_kv::wheels::WheelEchoPolicy<EchoPolicy>>>,
-      J: From<blockwheel_kv::job::LookupRangeMergeSklaveJob<EchoPolicy>>,
-      J: From<blockwheel_kv::job::PerformerSklaveJob<EchoPolicy>>,
-      J: From<ftd_sklave::SklaveJob>,
+where J: From<job::BlockwheelFsSklaveJob>,
+      J: From<job::BlockwheelKvLookupRangeMergeSklaveJob>,
+      J: From<job::BlockwheelKvPerformerSklaveJob>,
+      J: From<job::FtdSklaveJob>,
       J: Send + 'static,
 {
     let wheels = state.wheels
@@ -172,8 +173,8 @@ async fn busyloop<J>(
     thread_pool: edeltraud::Handle<J>,
 )
     -> Result<(), ErrorSeverity<State<J>, Error>>
-where J: From<blockwheel_kv::job::PerformerSklaveJob<EchoPolicy>>,
-      J: From<blockwheel_kv::job::LookupRangeMergeSklaveJob<EchoPolicy>>,
+where J: From<job::BlockwheelKvPerformerSklaveJob>,
+      J: From<job::BlockwheelKvLookupRangeMergeSklaveJob>,
       J: Send + 'static,
 {
     let mut lookup_tasks =
