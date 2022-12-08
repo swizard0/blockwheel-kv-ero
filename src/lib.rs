@@ -22,7 +22,7 @@ use alloc_pool::{
     },
 };
 
-pub use blockwheel_kv::{
+use blockwheel_kv::{
     kv,
     version,
     Params,
@@ -30,7 +30,6 @@ pub use blockwheel_kv::{
     Removed,
     Flushed,
     Info,
-    WheelInfo,
 };
 
 pub mod job;
